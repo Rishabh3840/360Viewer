@@ -3,105 +3,46 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>360° Viewer</title>
+  <title>360 Photo Viewer</title>
   <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-      background-color: #000;
-    }
-    #loading {
-      position: fixed;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      background: rgba(0, 0, 0, 0.8);
-      color: #fff;
-      font-size: 1.5rem;
-      font-family: sans-serif;
-      z-index: 999;
-    }
+    body { margin: 0; overflow: hidden; background: #000; }
+    #viewer { width: 100vw; height: 100vh; cursor: grab; }
   </style>
 </head>
 <body>
-  <div id="loading">Loading image...</div>
+  <div id="viewer"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
-
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-    // Scene setup
+    const container = document.getElementById('viewer');
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+
+    const renderer = new THREE.WebGLRenderer();
     renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+    container.appendChild(renderer.domElement);
 
     const geometry = new THREE.SphereGeometry(500, 60, 40);
     geometry.scale(-1, 1, 1);
 
-    const textureLoader = new THREE.TextureLoader();
-    const loadingOverlay = document.getElementById('loading');
-
-    // Load main texture
-    const texture = textureLoader.load(
-      'room.jpg', // your 360° image (must be in the same folder)
-      function () {
-        loadingOverlay.style.display = 'none';
-      },
+    const texture = new THREE.TextureLoader().load(
+      'room.jpg',
+      () => console.log('Image loaded!'),
       undefined,
-      function () {
-        console.warn('Could not load room.jpg, using placeholder instead.');
-        loadPlaceholder();
-      }
+      err => console.error('Error loading image', err)
     );
-
     const material = new THREE.MeshBasicMaterial({ map: texture });
     const mesh = new THREE.Mesh(geometry, material);
     scene.add(mesh);
 
-    // Controls
-    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableZoom = true;
-    controls.enablePan = false;
-    controls.rotateSpeed = 0.3;
-    camera.position.set(0, 0, 0.1);
-
-    // Placeholder loader (on error)
-    function loadPlaceholder() {
-      const placeholderUrl = "https://placehold.co/4096x2048/333/eee?text=Could+not+load+room.jpg";
-      const placeholderTexture = textureLoader.load(placeholderUrl, () => {
-        loadingOverlay.style.display = 'none';
-      });
-      mesh.material.map = placeholderTexture;
-      mesh.material.needsUpdate = true;
-    }
-
-    // Auto rotate when idle
-    let lastMoveTime = Date.now();
-    document.addEventListener('mousemove', () => lastMoveTime = Date.now());
-
+    let lon = 0, lat = 0;
     function animate() {
       requestAnimationFrame(animate);
-      const now = Date.now();
-      if (now - lastMoveTime > 3000) { // after 3s idle
-        mesh.rotation.y += 0.0008; // slow rotation
-      }
-      controls.update();
+      lat += 0.1; // slow rotation
+      camera.lookAt(500 * Math.sin(lat), 0, 500 * Math.cos(lat));
       renderer.render(scene, camera);
     }
-
     animate();
-
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
   </script>
 </body>
 </html>
