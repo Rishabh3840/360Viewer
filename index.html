@@ -1,48 +1,205 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>360 Photo Viewer</title>
-  <style>
-    body { margin: 0; overflow: hidden; background: #000; }
-    #viewer { width: 100vw; height: 100vh; cursor: grab; }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360 Photo Viewer</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            color: #eee;
+            overflow: hidden; /* Hide scrollbars */
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            cursor: grab;
+        }
+        #container:grabbing {
+            cursor: grabbing;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 12px;
+            font-size: 0.9rem;
+            text-align: center;
+            pointer-events: none; /* Don't let it block mouse events */
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+    </style>
 </head>
 <body>
-  <div id="viewer"></div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script>
-    const container = document.getElementById('viewer');
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
+    <div id="container"></div>
+    <div id="instructions">
+        Click and drag to look around. Scroll to zoom.
+    </div>
 
-    const renderer = new THREE.WebGLRenderer();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
+    <!-- Import three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-    const geometry = new THREE.SphereGeometry(500, 60, 40);
-    geometry.scale(-1, 1, 1);
+    <script type="module">
+        // Get the container element
+        const container = document.getElementById('container');
 
-    const texture = new THREE.TextureLoader().load(
-      'room.jpg',
-      () => console.log('Image loaded!'),
-      undefined,
-      err => console.error('Error loading image', err)
-    );
-    const material = new THREE.MeshBasicMaterial({ map: texture });
-    const mesh = new THREE.Mesh(geometry, material);
-    scene.add(mesh);
+        // Scene, Camera, and Renderer
+        let scene, camera, renderer;
 
-    let lon = 0, lat = 0;
-    function animate() {
-      requestAnimationFrame(animate);
-      lat += 0.1; // slow rotation
-      camera.lookAt(500 * Math.sin(lat), 0, 500 * Math.cos(lat));
-      renderer.render(scene, camera);
-    }
-    animate();
-  </script>
+        // Sphere mesh
+        let mesh;
+
+        // Mouse/Touch controls
+        let isUserInteracting = false;
+        let onPointerDownMouseX = 0, onPointerDownMouseY = 0;
+        let lon = 0, onPointerDownLon = 0;
+        let lat = 0, onPointerDownLat = 0;
+        let phi = 0, theta = 0;
+
+        init();
+        animate();
+
+        function init() {
+            // --- Camera ---
+            // Create a PerspectiveCamera
+            // FOV, Aspect Ratio, Near, Far
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
+
+            // --- Scene ---
+            scene = new THREE.Scene();
+
+            // --- Geometry ---
+            // Create a sphere geometry.
+            // Radius, WidthSegments, HeightSegments
+            // We reverse the normals by making the radius negative so the texture maps to the inside.
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            geometry.scale(-1, 1, 1); // Invert the geometry on the x-axis
+
+            // --- Texture ---
+            const texture = new THREE.TextureLoader().load(
+                'room.jpg', // The equirectangular image
+                () => console.log('Texture loaded successfully.'),
+                undefined, // onProgress callback
+                (err) => {
+                    // Handle error
+                    console.error('An error happened while loading the texture.', err);
+                    // Load a placeholder if 'room.jpg' fails
+                    loadPlaceholder();
+                }
+            );
+            
+            // --- Material ---
+            // Map the texture to a basic material
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+
+            // --- Mesh ---
+            // Create the mesh and add it to the scene
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            // --- Renderer ---
+            renderer = new THREE.WebGLRenderer();
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // --- Event Listeners ---
+            container.addEventListener('pointerdown', onPointerDown);
+            container.addEventListener('pointermove', onPointerMove);
+            container.addEventListener('pointerup', onPointerUp);
+            container.addEventListener('wheel', onDocumentMouseWheel);
+            window.addEventListener('resize', onWindowResize);
+        }
+        
+        function loadPlaceholder() {
+            // Use a placeholder image if the original fails
+            const placeholderUrl = https://placehold.co/4096x2048/333/eee?text=Could+not+load+room.jpg;
+            const placeholderTexture = new THREE.TextureLoader().load(placeholderUrl);
+            mesh.material.map = placeholderTexture;
+            mesh.material.needsUpdate = true;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onPointerDown(event) {
+            isUserInteracting = true;
+            container.style.cursor = 'grabbing';
+
+            onPointerDownMouseX = event.clientX;
+            onPointerDownMouseY = event.clientY;
+
+            onPointerDownLon = lon;
+            onPointerDownLat = lat;
+        }
+
+        function onPointerMove(event) {
+            if (isUserInteracting === true) {
+                // Calculate difference
+                const deltaX = event.clientX - onPointerDownMouseX;
+                const deltaY = event.clientY - onPointerDownMouseY;
+
+                // Adjust longitude (left/right) and latitude (up/down)
+                // The 0.1 scaling factor controls sensitivity
+                lon = (deltaX * 0.1) + onPointerDownLon;
+                lat = (deltaY * 0.1) + onPointerDownLat;
+            }
+        }
+
+        function onPointerUp() {
+            isUserInteracting = false;
+            container.style.cursor = 'grab';
+        }
+
+        function onDocumentMouseWheel(event) {
+            // Get the zoom direction
+            const fov = camera.fov + event.deltaY * 0.05;
+            
+            // Clamp FOV (zoom)
+            camera.fov = THREE.MathUtils.clamp(fov, 10, 75);
+            
+            // Important: Update the camera's projection matrix
+            camera.updateProjectionMatrix();
+        }
+
+        function animate() {
+            // Schedule the next frame
+            requestAnimationFrame(animate);
+            
+            // Update camera rotation
+            updateCamera();
+        }
+
+        function updateCamera() {
+            // Clamp latitude to prevent flipping over at the poles
+            lat = Math.max(-85, Math.min(85, lat));
+
+            // Convert spherical coordinates (lat, lon) to Cartesian (x, y, z)
+            phi = THREE.MathUtils.degToRad(90 - lat);
+            theta = THREE.MathUtils.degToRad(lon);
+
+            const x = 500 * Math.sin(phi) * Math.cos(theta);
+            const y = 500 * Math.cos(phi);
+            const z = 500 * Math.sin(phi) * Math.sin(theta);
+
+            // Point the camera at the calculated position
+            // The camera itself stays at (0, 0, 0)
+            camera.lookAt(x, y, z);
+
+            // Render the scene from the camera's perspective
+            renderer.render(scene, camera);
+        }
+    </script>
+
 </body>
 </html>
