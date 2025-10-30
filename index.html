@@ -3,202 +3,228 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>360 Photo Viewer</title>
+    <title>360° Image Viewer</title>
+    <!-- Load Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Load three.js (3D library) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Load OrbitControls (for mouse/touch rotation) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
+        /* Ensure body and html take full height and remove margins */
+        html, body {
             margin: 0;
             padding: 0;
-            background-color: #111;
-            color: #eee;
-            overflow: hidden; /* Hide scrollbars */
+            height: 100%;
+            width: 100%;
+            overflow: hidden; /* Prevent scrollbars */
+            font-family: 'Inter', sans-serif;
         }
-        #container {
-            width: 100vw;
-            height: 100vh;
-            cursor: grab;
-        }
-        #container:grabbing {
-            cursor: grabbing;
-        }
-        #instructions {
+        /* Ensure the canvas container fills the screen */
+        #canvas-container {
             position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            padding: 10px 20px;
-            background-color: rgba(0, 0, 0, 0.6);
-            border-radius: 12px;
-            font-size: 0.9rem;
-            text-align: center;
-            pointer-events: none; /* Don't let it block mouse events */
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
         }
+        /* Style for the canvas element itself */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Style for the UI panel */
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 20; /* On top of the canvas */
+        }
+        /* Custom font for the page */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
     </style>
 </head>
-<body>
+<body class="bg-gray-900">
 
-    <div id="container"></div>
-    <div id="instructions">
-        Click and drag (or swipe) to look around. Scroll to zoom.
+    <!-- Container for the 3D canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- UI for loading a new image -->
+    <div id="ui-container" class="p-4 bg-black/50 backdrop-blur-sm shadow-md">
+        <div class="max-w-3xl mx-auto flex flex-col sm:flex-row gap-3 items-center">
+            <label for="imageUrl" class="text-white font-medium shrink-0">360° Image URL:</label>
+            <input type="text" id="imageUrl" class="w-full flex-grow bg-white/10 text-white placeholder-white/60 border border-white/30 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition" placeholder="https://...">
+            <button id="loadButton" class="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-5 rounded-lg transition-colors shrink-0">
+                Load
+            </button>
+        </div>
+    </div>
+    
+    <!-- Custom message box for errors (replaces alert()) -->
+    <div id="message-box" class="hidden fixed top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-red-600 text-white p-6 rounded-lg shadow-xl z-50 text-center">
+        <p id="message-text"></p>
     </div>
 
-    <!-- Import three.js library -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-
     <script type="module">
-        // Get the container element
-        const container = document.getElementById('container');
+        // Global variables for the 3D scene
+        let scene, camera, renderer, controls, sphereMesh;
 
-        // Scene, Camera, and Renderer
-        let scene, camera, renderer;
+        // Get DOM elements
+        const container = document.getElementById('canvas-container');
+        const imageUrlInput = document.getElementById('imageUrl');
+        const loadButton = document.getElementById('loadButton');
+        const messageBox = document.getElementById('message-box');
+        const messageText = document.getElementById('message-text');
 
-        // Sphere mesh
-        let mesh;
+        // Function to show a custom message
+        function showMessage(message, duration = 3000) {
+            messageText.textContent = message;
+            messageBox.classList.remove('hidden');
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, duration);
+        }
 
-        // Mouse/Touch controls
-        let isUserInteracting = false;
-        let onPointerDownMouseX = 0, onPointerDownMouseY = 0;
-        
-        // lon = longitude (horizontal rotation), lat = latitude (vertical rotation)
-        let lon = 0, onPointerDownLon = 0;
-        let lat = 0, onPointerDownLat = 0;
-        let phi = 0, theta = 0;
-
-        init();
-        animate();
-
+        /**
+         * Initializes the 3D scene, camera, renderer, and controls
+         */
         function init() {
-            // --- Camera ---
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
-
-            // --- Scene ---
+            // 1. Create the Scene
             scene = new THREE.Scene();
 
-            // --- Geometry ---
-            const geometry = new THREE.SphereGeometry(500, 60, 40);
-            geometry.scale(-1, 1, 1); // Invert the geometry on the x-axis
+            // 2. Create the Camera
+            // FOV, Aspect Ratio, Near clip, Far clip
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Position the camera slightly off-center to see the inside
+            camera.position.z = 0.01;
 
-            // --- Texture ---
-            const texture = new THREE.TextureLoader().load(
-                'room.jpg', // The equirectangular image
-                () => console.log('Texture loaded successfully.'),
-                undefined, // onProgress callback
-                (err) => {
-                    console.error('An error happened while loading the texture.', err);
-                    loadPlaceholder();
-                }
-            );
-            
-            // --- Material ---
-            const material = new THREE.MeshBasicMaterial({ map: texture });
-
-            // --- Mesh ---
-            mesh = new THREE.Mesh(geometry, material);
-            scene.add(mesh);
-
-            // --- Renderer ---
+            // 3. Create the Renderer
             renderer = new THREE.WebGLRenderer();
-            renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             container.appendChild(renderer.domElement);
 
-            // --- Event Listeners ---
-            // 'pointerdown' works for both mouse clicks and touch taps
-            container.addEventListener('pointerdown', onPointerDown);
-            // 'pointermove' works for both mouse dragging and touch swiping
-            container.addEventListener('pointermove', onPointerMove);
-            // 'pointerup' works for both mouse release and touch release
-            container.addEventListener('pointerup', onPointerUp);
-            container.addEventListener('wheel', onDocumentMouseWheel);
-            window.addEventListener('resize', onWindowResize);
-        }
-        
-        function loadPlaceholder() {
-            // Use a placeholder image if the original fails
-            const placeholderUrl = https://placehold.co/4096x2048/333/eee?text=Could+not+load+room.jpg;
-            const placeholderTexture = new THREE.TextureLoader().load(placeholderUrl);
-            mesh.material.map = placeholderTexture;
-            mesh.material.needsUpdate = true;
+            // 4. Create the Sphere Geometry and Material
+            // A large sphere with many segments for smoothness
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            
+            // CRITICAL: Invert the geometry 'normals' so the texture maps to the inside
+            geometry.scale(-1, 1, 1);
+
+            // Start with a basic material as a placeholder
+            const material = new THREE.MeshBasicMaterial({ color: 0x444444 });
+
+            // Create the final mesh (geometry + material)
+            sphereMesh = new THREE.Mesh(geometry, material);
+            scene.add(sphereMesh);
+
+            // 5. Add Controls
+            // OrbitControls handles mouse drag and touch swipe
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableZoom = false;  // Disable zooming
+            controls.enablePan = false;   // Disable panning
+            controls.rotateSpeed = -0.25; // Invert rotation for a "natural" feel
+
+            // 6. Add Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            loadButton.addEventListener('click', loadNewImage);
+
+            // 7. Set initial image URL and load it
+            // This is the user's original URL
+            imageUrlInput.value = 'https://rishabh3840.github.io/360viewer/image.jpg';
+            loadNewImage();
+
+            // 8. Start the animation loop
+            animate();
         }
 
+        /**
+         * Loads an image from the input field and applies it as a texture
+         */
+        function loadNewImage() {
+            const imageUrl = imageUrlInput.value.trim();
+            if (!imageUrl) {
+                showMessage("Please enter an image URL.");
+                return;
+            }
+
+            // Show loading state on button
+            loadButton.disabled = true;
+            loadButton.textContent = 'Loading...';
+
+            const textureLoader = new THREE.TextureLoader();
+            
+            // Set crossOrigin to 'anonymous'
+            // Even if on the same domain, it's good practice.
+            // If it is on a different domain, it will try to get CORS headers.
+            textureLoader.setCrossOrigin('anonymous');
+
+            textureLoader.load(
+                imageUrl,
+                // 1. onLoad callback
+                (texture) => {
+                    // Create a new material with the loaded texture
+                    const newMaterial = new THREE.MeshBasicMaterial({ map: texture });
+                    
+                    // Clean up the old material to free up memory
+                    if (sphereMesh.material.dispose) {
+                        sphereMesh.material.dispose();
+                    }
+                    if (sphereMesh.material.map && sphereMesh.material.map.dispose) {
+                        sphereMesh.material.map.dispose();
+                    }
+
+                    // Apply the new material to the sphere
+                    sphereMesh.material = newMaterial;
+
+                    // Reset button state
+                    loadButton.disabled = false;
+                    loadButton.textContent = 'Load';
+                },
+                // 2. onProgress callback (optional)
+                undefined,
+                // 3. onError callback
+                (error) => {
+                    console.error('Error loading 360 image:', error);
+                    showMessage('Error: Could not load image. Check URL.');
+                    // Reset button state
+                    loadButton.disabled = false;
+                    loadButton.textContent = 'Load';
+                }
+            );
+        }
+
+        /**
+         * Handles window resize events to keep the aspect ratio correct
+         */
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function onPointerDown(event) {
-            // User has started clicking or touching
-            isUserInteracting = true;
-            container.style.cursor = 'grabbing';
-
-            // Store the starting position of the interaction
-            onPointerDownMouseX = event.clientX;
-            onPointerDownMouseY = event.clientY;
-
-            // Store the starting camera angle
-            onPointerDownLon = lon;
-            onPointerDownLat = lat;
-        }
-
-        function onPointerMove(event) {
-            // This function only runs if the user is actively swiping/dragging
-            if (isUserInteracting === true) {
-                // Calculate difference from start
-                const deltaX = event.clientX - onPointerDownMouseX;
-                const deltaY = event.clientY - onPointerDownMouseY;
-
-                // Adjust longitude (left/right) and latitude (up/down) based on the swipe
-                lon = (deltaX * 0.1) + onPointerDownLon;
-                lat = (deltaY * 0.1) + onPointerDownLat;
-            }
-        }
-
-        function onPointerUp() {
-            // User has finished clicking or touching
-            isUserInteracting = false;
-            container.style.cursor = 'grab';
-        }
-
-        function onDocumentMouseWheel(event) {
-            // Zoom with the scroll wheel
-            const fov = camera.fov + event.deltaY * 0.05;
-            camera.fov = THREE.MathUtils.clamp(fov, 10, 75);
-            camera.updateProjectionMatrix();
-        }
-
+        /**
+         * The main animation loop (runs every frame)
+         */
         function animate() {
-            // This function is the render loop, it runs on every frame
+            // Request the next frame
             requestAnimationFrame(animate);
-            
-            // This function updates the camera's position based on the
-            // 'lat' and 'lon' variables. 'lat' and 'lon' are ONLY
-            // changed by user input (in onPointerMove), so no
-            // automatic rotation will happen.
-            updateCamera();
-        }
 
-        function updateCamera() {
-            // Clamp latitude to prevent flipping over at the poles
-            lat = Math.max(-85, Math.min(85, lat));
+            // Update controls (applies swipe/drag changes)
+            controls.update();
 
-            // Convert spherical coordinates (lat, lon) to Cartesian (x, y, z)
-            // for the camera to look at.
-            phi = THREE.MathUtils.degToRad(90 - lat);
-            theta = THREE.MathUtils.degToRad(lon);
-
-            const x = 500 * Math.sin(phi) * Math.cos(theta);
-            const y = 500 * Math.cos(phi);
-            const z = 500 * Math.sin(phi) * Math.sin(theta);
-
-            // Point the camera at the calculated position
-            camera.lookAt(x, y, z);
-
-            // Render the scene
+            // Render the scene from the camera's perspective
             renderer.render(scene, camera);
         }
-    </script>
 
+        // Start the application
+        init();
+
+    </script>
 </body>
 </html>
