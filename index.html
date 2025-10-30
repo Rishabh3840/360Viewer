@@ -1,106 +1,204 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>360 Photo Viewer</title>
-  <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      overflow: hidden;
-      height: 100%;
-      background-color: #000;
-    }
-    #viewer {
-      width: 100%;
-      height: 100%;
-      cursor: grab;
-      touch-action: none;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>360 Photo Viewer</title>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #111;
+            color: #eee;
+            overflow: hidden; /* Hide scrollbars */
+        }
+        #container {
+            width: 100vw;
+            height: 100vh;
+            cursor: grab;
+        }
+        #container:grabbing {
+            cursor: grabbing;
+        }
+        #instructions {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: rgba(0, 0, 0, 0.6);
+            border-radius: 12px;
+            font-size: 0.9rem;
+            text-align: center;
+            pointer-events: none; /* Don't let it block mouse events */
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+    </style>
 </head>
 <body>
-  <div id="viewer"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+    <div id="container"></div>
+    <div id="instructions">
+        Click and drag (or swipe) to look around. Scroll to zoom.
+    </div>
 
-  <script>
-    const container = document.getElementById("viewer");
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    container.appendChild(renderer.domElement);
+    <!-- Import three.js library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
-    const geometry = new THREE.SphereGeometry(500, 60, 40);
-    geometry.scale(-1, 1, 1);
+    <script type="module">
+        // Get the container element
+        const container = document.getElementById('container');
 
-    const loader = new THREE.TextureLoader();
-    loader.load("./room.jpg", (texture) => {
-      const material = new THREE.MeshBasicMaterial({ map: texture });
-      const mesh = new THREE.Mesh(geometry, material);
-      scene.add(mesh);
-      animate();
-    });
+        // Scene, Camera, and Renderer
+        let scene, camera, renderer;
 
-    let lon = 0, lat = 0;
-    let isUserInteracting = false;
-    let onPointerDownPointerX = 0, onPointerDownPointerY = 0;
-    let onPointerDownLon = 0, onPointerDownLat = 0;
+        // Sphere mesh
+        let mesh;
 
-    function onPointerDown(event) {
-      isUserInteracting = true;
-      onPointerDownPointerX = event.clientX || event.touches?.[0]?.clientX;
-      onPointerDownPointerY = event.clientY || event.touches?.[0]?.clientY;
-      onPointerDownLon = lon;
-      onPointerDownLat = lat;
-      container.style.cursor = "grabbing";
-    }
+        // Mouse/Touch controls
+        let isUserInteracting = false;
+        let onPointerDownMouseX = 0, onPointerDownMouseY = 0;
+        
+        // lon = longitude (horizontal rotation), lat = latitude (vertical rotation)
+        let lon = 0, onPointerDownLon = 0;
+        let lat = 0, onPointerDownLat = 0;
+        let phi = 0, theta = 0;
 
-    function onPointerMove(event) {
-      if (isUserInteracting) {
-        const clientX = event.clientX || event.touches?.[0]?.clientX;
-        const clientY = event.clientY || event.touches?.[0]?.clientY;
-        lon = (onPointerDownPointerX - clientX) * 0.1 + onPointerDownLon;
-        lat = (clientY - onPointerDownPointerY) * 0.1 + onPointerDownLat;
-      }
-    }
+        init();
+        animate();
 
-    function onPointerUp() {
-      isUserInteracting = false;
-      container.style.cursor = "grab";
-    }
+        function init() {
+            // --- Camera ---
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 1100);
 
-    function onWindowResize() {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    }
+            // --- Scene ---
+            scene = new THREE.Scene();
 
-    container.addEventListener("mousedown", onPointerDown);
-    container.addEventListener("mousemove", onPointerMove);
-    container.addEventListener("mouseup", onPointerUp);
+            // --- Geometry ---
+            const geometry = new THREE.SphereGeometry(500, 60, 40);
+            geometry.scale(-1, 1, 1); // Invert the geometry on the x-axis
 
-    container.addEventListener("touchstart", onPointerDown);
-    container.addEventListener("touchmove", onPointerMove);
-    container.addEventListener("touchend", onPointerUp);
+            // --- Texture ---
+            const texture = new THREE.TextureLoader().load(
+                'room.jpg', // The equirectangular image
+                () => console.log('Texture loaded successfully.'),
+                undefined, // onProgress callback
+                (err) => {
+                    console.error('An error happened while loading the texture.', err);
+                    loadPlaceholder();
+                }
+            );
+            
+            // --- Material ---
+            const material = new THREE.MeshBasicMaterial({ map: texture });
 
-    window.addEventListener("resize", onWindowResize);
+            // --- Mesh ---
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
 
-    function animate() {
-      requestAnimationFrame(animate);
-      lat = Math.max(-85, Math.min(85, lat));
-      const phi = THREE.MathUtils.degToRad(90 - lat);
-      const theta = THREE.MathUtils.degToRad(lon);
-      camera.target = new THREE.Vector3(
-        500 * Math.sin(phi) * Math.cos(theta),
-        500 * Math.cos(phi),
-        500 * Math.sin(phi) * Math.sin(theta)
-      );
-      camera.lookAt(camera.target);
-      renderer.render(scene, camera);
-    }
-  </script>
+            // --- Renderer ---
+            renderer = new THREE.WebGLRenderer();
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            container.appendChild(renderer.domElement);
+
+            // --- Event Listeners ---
+            // 'pointerdown' works for both mouse clicks and touch taps
+            container.addEventListener('pointerdown', onPointerDown);
+            // 'pointermove' works for both mouse dragging and touch swiping
+            container.addEventListener('pointermove', onPointerMove);
+            // 'pointerup' works for both mouse release and touch release
+            container.addEventListener('pointerup', onPointerUp);
+            container.addEventListener('wheel', onDocumentMouseWheel);
+            window.addEventListener('resize', onWindowResize);
+        }
+        
+        function loadPlaceholder() {
+            // Use a placeholder image if the original fails
+            const placeholderUrl = https://placehold.co/4096x2048/333/eee?text=Could+not+load+room.jpg;
+            const placeholderTexture = new THREE.TextureLoader().load(placeholderUrl);
+            mesh.material.map = placeholderTexture;
+            mesh.material.needsUpdate = true;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function onPointerDown(event) {
+            // User has started clicking or touching
+            isUserInteracting = true;
+            container.style.cursor = 'grabbing';
+
+            // Store the starting position of the interaction
+            onPointerDownMouseX = event.clientX;
+            onPointerDownMouseY = event.clientY;
+
+            // Store the starting camera angle
+            onPointerDownLon = lon;
+            onPointerDownLat = lat;
+        }
+
+        function onPointerMove(event) {
+            // This function only runs if the user is actively swiping/dragging
+            if (isUserInteracting === true) {
+                // Calculate difference from start
+                const deltaX = event.clientX - onPointerDownMouseX;
+                const deltaY = event.clientY - onPointerDownMouseY;
+
+                // Adjust longitude (left/right) and latitude (up/down) based on the swipe
+                lon = (deltaX * 0.1) + onPointerDownLon;
+                lat = (deltaY * 0.1) + onPointerDownLat;
+            }
+        }
+
+        function onPointerUp() {
+            // User has finished clicking or touching
+            isUserInteracting = false;
+            container.style.cursor = 'grab';
+        }
+
+        function onDocumentMouseWheel(event) {
+            // Zoom with the scroll wheel
+            const fov = camera.fov + event.deltaY * 0.05;
+            camera.fov = THREE.MathUtils.clamp(fov, 10, 75);
+            camera.updateProjectionMatrix();
+        }
+
+        function animate() {
+            // This function is the render loop, it runs on every frame
+            requestAnimationFrame(animate);
+            
+            // This function updates the camera's position based on the
+            // 'lat' and 'lon' variables. 'lat' and 'lon' are ONLY
+            // changed by user input (in onPointerMove), so no
+            // automatic rotation will happen.
+            updateCamera();
+        }
+
+        function updateCamera() {
+            // Clamp latitude to prevent flipping over at the poles
+            lat = Math.max(-85, Math.min(85, lat));
+
+            // Convert spherical coordinates (lat, lon) to Cartesian (x, y, z)
+            // for the camera to look at.
+            phi = THREE.MathUtils.degToRad(90 - lat);
+            theta = THREE.MathUtils.degToRad(lon);
+
+            const x = 500 * Math.sin(phi) * Math.cos(theta);
+            const y = 500 * Math.cos(phi);
+            const z = 500 * Math.sin(phi) * Math.sin(theta);
+
+            // Point the camera at the calculated position
+            camera.lookAt(x, y, z);
+
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+    </script>
+
 </body>
 </html>
